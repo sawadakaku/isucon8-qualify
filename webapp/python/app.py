@@ -9,6 +9,7 @@ import subprocess
 from io import StringIO
 import csv
 from datetime import datetime, timezone
+import hashlib
 
 
 base_path = pathlib.Path(__file__).resolve().parent.parent
@@ -248,6 +249,8 @@ def post_users():
     conn = dbh()
     conn.autocommit(False)
     cur = conn.cursor()
+    pass_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    print(pass_hash)
     try:
         cur.execute("SELECT * FROM users WHERE login_name = %s", [login_name])
         duplicated = cur.fetchone()
@@ -255,8 +258,8 @@ def post_users():
             conn.rollback()
             return res_error('duplicated', 409)
         cur.execute(
-            "INSERT INTO users (login_name, pass_hash, nickname) VALUES (%s, SHA2(%s, 256), %s)",
-            [login_name, password, nickname])
+            "INSERT INTO users (login_name, pass_hash, nickname) VALUES (%s, %s, %s)",
+            [login_name, pass_hash, nickname])
         user_id = cur.lastrowid
         conn.commit()
     except MySQLdb.Error as e:
@@ -478,10 +481,9 @@ def post_adin_login():
 
     cur.execute('SELECT * FROM administrators WHERE login_name = %s', [login_name])
     administrator = cur.fetchone()
-    cur.execute('SELECT SHA2(%s, 256) AS pass_hash', [password])
-    pass_hash = cur.fetchone()
+    pass_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
 
-    if not administrator or pass_hash['pass_hash'] != administrator['pass_hash']:
+    if not administrator or pass_hash != administrator['pass_hash']:
         return res_error("authentication_failed", 401)
 
     flask.session['administrator_id'] = administrator['id']
