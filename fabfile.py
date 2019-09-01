@@ -1,16 +1,25 @@
 from fabric import task
 import os.path
+import glob
+import re
 
 @task
 def deploy_webapp(c):
     # copy files under webapp/**/* to /home/isucon/torb/webapp
-    for local_file in glob.glob('./webapp/**/*', recursive=True):
-        remote_file = re.sub('^\.', '/home/isucon/torb', local_file)
+    lacal_files = c.run('git ls-files ./webapp').stdout.strip().split('\n')
+    for local_file in local_files:
+        if os.path.isdir(local_file):
+            continue
+        remote_file = os.path.join('/home/isucon/torb', local_file)
+        if c.run('test -d {}'.format(os.path.dirname(remote_file)), warn=True).failed:
+            c.run(f"mkdir -p {os.path.dirname(remote_file)}")
         c.put(local_file, remote_file)
-
     # copy files under db/**/* to /home/isucon/torb/webapp
-    for local_file in glob.glob('./db/**/*', recursive=True):
-        remote_file = re.sub('^\.', '/home/isucon/torb', local_file)
+    lacal_files = c.run('git ls-files ./db').stdout.strip().split('\n')
+    for local_file in local_files:
+        if os.path.isdir(local_file):
+            continue
+        remote_file = os.path.join('/home/isucon/torb', local_file)
         c.put(local_file, remote_file)
 
     # /etc files
@@ -22,8 +31,19 @@ def deploy_webapp(c):
     ]
 
     for etc_file in etc_files:
-        c.put(os.path.join('./etc', etc_file), os.path.join('/home/isucon/etc', etc_file))
-        c.sudo('cp {os.path.join("/home/isucon/etc", etc_file)} {os.path.join("/etc", etc_file)}')
+        print("etc_file: ", etc_file)
+        local_file = os.path.join('./etc', etc_file)
+        remote_file = os.path.join('/home/isucon/torb/etc', etc_file)
+        if c.run('test -d {}'.format(os.path.dirname(remote_file)), warn=True).failed:
+            c.run(f"mkdir -p {os.path.dirname(remote_file)}")
+        c.put(local_file, remote_file)
+        src_file = os.path.join("/home/isucon/torb/etc", etc_file)
+        dst_file = os.path.join("/etc", etc_file)
+        print("src_file: ", src_file)
+        print("dst_file: ", dst_file)
+        if c.sudo('test -d {}'.format(os.path.dirname(dst_file)), warn=True).failed:
+            c.sudo(f"mkdir -p {os.path.dirname(dst_file)}")
+        c.sudo(f'cp {src_file} {dst_file}')
 
     c.run('cd /home/isucon/torb/webapp/python && bash -lc "sh setup.sh"')
 
