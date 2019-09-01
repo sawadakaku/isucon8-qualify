@@ -6,7 +6,7 @@ import re
 @task
 def deploy_webapp(c):
     # copy files under webapp/**/* to /home/isucon/torb/webapp
-    lacal_files = c.run('git ls-files ./webapp').stdout.strip().split('\n')
+    local_files = c.local('git ls-files ./webapp').stdout.strip().split('\n')
     for local_file in local_files:
         if os.path.isdir(local_file):
             continue
@@ -15,7 +15,7 @@ def deploy_webapp(c):
             c.run(f"mkdir -p {os.path.dirname(remote_file)}")
         c.put(local_file, remote_file)
     # copy files under db/**/* to /home/isucon/torb/webapp
-    lacal_files = c.run('git ls-files ./db').stdout.strip().split('\n')
+    local_files = c.local('git ls-files ./db').stdout.strip().split('\n')
     for local_file in local_files:
         if os.path.isdir(local_file):
             continue
