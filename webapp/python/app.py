@@ -9,6 +9,7 @@ import subprocess
 from io import StringIO
 import csv
 from datetime import datetime, timezone
+import hashlib
 
 
 base_path = pathlib.Path(__file__).resolve().parent.parent
@@ -128,18 +129,24 @@ def get_event(event_id, login_user_id=None):
     for rank in ["S", "A", "B", "C"]:
         event["sheets"][rank] = {'total': 0, 'remains': 0, 'detail': []}
 
+    # TODO: 関連するEventのSheetだけとってこれるようにする
     cur.execute("SELECT * FROM sheets ORDER BY `rank`, num")
     sheets = cur.fetchall()
+
+    cur.execute("SELECT * FROM reservations WHERE event_id = %s AND canceled_at IS NULL GROUP BY event_id, sheet_id HAVING reserved_at = MIN(reserved_at)", (event['id'],))
+    reservations = cur.fetchall()
+
+    reservation_dict = {
+        r['sheet_id']: r for r in reservations
+    }
+
     for sheet in sheets:
         if not event['sheets'][sheet['rank']].get('price'):
             event['sheets'][sheet['rank']]['price'] = event['price'] + sheet['price']
         event['total'] += 1
         event['sheets'][sheet['rank']]['total'] += 1
 
-        cur.execute(
-            "SELECT * FROM reservations WHERE event_id = %s AND sheet_id = %s AND canceled_at IS NULL GROUP BY event_id, sheet_id HAVING reserved_at = MIN(reserved_at)",
-            [event['id'], sheet['id']])
-        reservation = cur.fetchone()
+        reservation = reservation_dict[sheet['id']] if sheet['id'] in reservation_dict else None
         if reservation:
             if login_user_id and reservation['user_id'] == login_user_id:
                 sheet['mine'] = True
@@ -149,6 +156,9 @@ def get_event(event_id, login_user_id=None):
             event['remains'] += 1
             event['sheets'][sheet['rank']]['remains'] += 1
 
+        # sheet = { num: number }
+        # sheet = { num: number, reserved: True, reserved_at: time }
+        # sheet = { num: number, reserved: True, reserved_at: time, mine: True }
         event['sheets'][sheet['rank']]['detail'].append(sheet)
 
         del sheet['id']
@@ -239,6 +249,8 @@ def post_users():
     conn = dbh()
     conn.autocommit(False)
     cur = conn.cursor()
+    pass_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    print(pass_hash)
     try:
         cur.execute("SELECT * FROM users WHERE login_name = %s", [login_name])
         duplicated = cur.fetchone()
@@ -246,8 +258,8 @@ def post_users():
             conn.rollback()
             return res_error('duplicated', 409)
         cur.execute(
-            "INSERT INTO users (login_name, pass_hash, nickname) VALUES (%s, SHA2(%s, 256), %s)",
-            [login_name, password, nickname])
+            "INSERT INTO users (login_name, pass_hash, nickname) VALUES (%s, %s, %s)",
+            [login_name, pass_hash, nickname])
         user_id = cur.lastrowid
         conn.commit()
     except MySQLdb.Error as e:
@@ -469,10 +481,9 @@ def post_adin_login():
 
     cur.execute('SELECT * FROM administrators WHERE login_name = %s', [login_name])
     administrator = cur.fetchone()
-    cur.execute('SELECT SHA2(%s, 256) AS pass_hash', [password])
-    pass_hash = cur.fetchone()
+    pass_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
 
-    if not administrator or pass_hash['pass_hash'] != administrator['pass_hash']:
+    if not administrator or pass_hash != administrator['pass_hash']:
         return res_error("authentication_failed", 401)
 
     flask.session['administrator_id'] = administrator['id']

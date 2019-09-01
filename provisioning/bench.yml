@@ -7,5 +7,5 @@
     - deploy_webapp
     - deploy_bench
     - build_bench
-    - prepare_bench
-    - start_bench_worker
+    # - prepare_bench
+    # - start_bench_worker
