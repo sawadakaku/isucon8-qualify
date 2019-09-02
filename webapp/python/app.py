@@ -11,6 +11,10 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 
+from wsgi_lineprof.writers import SyncWriter
+from wsgi_lineprof.middleware import LineProfilerMiddleware
+from wsgi_lineprof.filters import FilenameFilter, TotalTimeSorter
+from wsgi_lineprof.extensions import LineProfiler
 
 base_path = pathlib.Path(__file__).resolve().parent.parent
 static_folder = base_path / 'static'
@@ -593,7 +597,6 @@ def get_admin_event_sales(event_id):
 
     return render_report_csv(reports)
 
-
 @app.route('/admin/api/reports/sales')
 @admin_login_required
 def get_admin_sales():
@@ -618,6 +621,77 @@ def get_admin_sales():
         })
     return render_report_csv(reports)
 
+@app.route('/stats/csv')
+def get_stats_csv():
+    stream = StringIO()
+    profiler = app.wsgi_app.profiler
+    profiler.disable()
+    stats = profiler.get_stats()
+    profiler.enable()
+    for f in app.wsgi_app.filters:
+        stats = stats.filter(f)
+
+    headers = ['Endpoint', 'File', 'Name', 'Total']
+
+    endpoints = {}
+    for rule in app.url_map.iter_rules():
+        endpoints[rule.endpoint] = (rule.rule, rule.methods)
+
+    print(','.join(headers), file=stream)
+
+    res = flask.make_response()
+    res.headers['Content-Type'] = 'text/csv'
+    # res.headers['Content-Disposition'] = 'attachment; filename=report.csv'
+
+    for stat in stats.stats:
+        endpoint = endpoints[stat.name][0] if stat.name in endpoints else ''
+        total_time = stat.total_time * LineProfiler.get_unit()
+        values = [
+            endpoint,
+            stat.filename,
+            stat.name,
+            "%.8f" % (total_time)
+        ]
+        print(','.join(values), file=stream)
+
+    res.data = stream.getvalue()
+    return res
+
+@app.route('/stats/raw')
+def get_stats():
+    stream = StringIO()
+    writer = SyncWriter(stream)
+    profiler = app.wsgi_app.profiler
+    profiler.disable()
+    stats = profiler.get_stats()
+    profiler.enable()
+    for f in app.wsgi_app.filters:
+        stats = stats.filter(f)
+    writer.write(stats)
+    return stream.getvalue()
+
+def stats_reset():
+    profiler = app.wsgi_app.profiler
+    profiler.disable()
+    profiler.reset()
+    profiler.enable()
+
+@app.route('/stats/reset')
+def get_stats_reset():
+    stats_reset()
+    return 'OK'
+
 
 if __name__ == "__main__":
-    app.run(port=8080, debug=True, threaded=True)
+    filters = [
+        FilenameFilter("webapp/python/app.py"),
+        lambda stats: filter(lambda stat: stat.total_time > 0.001, stats),
+        TotalTimeSorter()
+    ]
+
+    app.config['PROFILE'] = True
+
+    with open("lineprof.log", "w") as f:
+        app.wsgi_app = LineProfilerMiddleware(app.wsgi_app, stream=f, filters=filters, accumulate=True)
+        app.run(port=8080, debug=True, threaded=True)
+
